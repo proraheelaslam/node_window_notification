@@ -6,7 +6,7 @@ import http from "http";
 const app = express();
 app.use(bodyParser.json());
 
-// 🔹 Heroku ke liye dynamic port
+// 🔹 Heroku / VPS ke liye dynamic port
 const PORT = process.env.PORT || 4000;
 
 // HTTP server banaya jo Express + WS dono handle karega
@@ -31,7 +31,8 @@ wss.on("connection", (ws) => {
           clients[data.userId] = [];
         }
         clients[data.userId].push(ws);
-        console.log(`👤 Registered user: ${data.userId}`);
+        ws.userId = data.userId; // ✅ track directly on socket
+        console.log(` Registered user: ${data.userId}`);
       }
     } catch (err) {
       console.error("❌ Invalid message", err);
@@ -46,19 +47,30 @@ wss.on("connection", (ws) => {
         delete clients[userId];
       }
     }
-    console.log("❌ Client disconnected");
+     
   });
 });
 
 // 🔹 Function: Notification bhejna specific users ko
-function sendNotification(userIds, title, message) {
-  const payload = JSON.stringify({ type: "notification", title, message });
+function sendNotification(userIds, title, message, senderId) {
+  const payload = JSON.stringify({
+    type: "notification",
+    title,
+    message,
+    senderId, // ✅ include sender
+  });
 
   userIds.forEach((userId) => {
     const userSockets = clients[userId] || [];
     userSockets.forEach((client) => {
       if (client.readyState === 1) {
+        // ✅ Sender ko skip karo
+        if (userId === senderId) {
+          
+          return;
+        }
         client.send(payload);
+         
       }
     });
   });
@@ -66,7 +78,7 @@ function sendNotification(userIds, title, message) {
 
 // 🔹 REST API endpoint (notification trigger karega)
 app.post("/send", (req, res) => {
-  const { userIds, title, message } = req.body;
+  const { userIds, title, message, senderId } = req.body;
 
   if (!userIds || !Array.isArray(userIds)) {
     return res.status(400).json({ error: "userIds[] array is required" });
@@ -75,8 +87,8 @@ app.post("/send", (req, res) => {
     return res.status(400).json({ error: "title and message are required" });
   }
 
-  sendNotification(userIds, title, message);
-  res.json({ success: true, sentTo: userIds, title, message });
+  sendNotification(userIds, title, message, senderId);
+  res.json({ success: true, sentTo: userIds, title, message, senderId });
 });
 
 // 🔹 Start Express + WebSocket server
